@@ -71,6 +71,11 @@ class DataBase:
 
             print(f"База данных {self.db_name} успешно создана или уже существует.")
 
+    def create_new_db(self):
+        """Создает таблицу для сбора данных FSM"""
+        
+        pass
+
     def user_exam(self, chat_id: int) -> bool:
         """Проверяет есть ли ID пользователя в базе"""
         with sqlite3.connect(self.db_name) as conn:
@@ -137,6 +142,22 @@ class DataBase:
 
             user_id = user_id[0]
             cursor.execute('INSERT OR REPLACE INTO users_e_mail (user_id, e_mail) VALUES (?, ?)', (user_id, email))
+            conn.commit()
+            return True
+
+    def save_user_telephone(self, chat_id:int, telephone:str):
+        """Сохраняет в БД номер телефона пользователя, связываает его с CHAT_ID"""
+
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id FROM tg_bot_users WHERE chat_id = ?', (chat_id,))
+            user_id = cursor.fetchone()
+
+            if user_id is None:
+                return False
+
+            user_id = user_id[0]
+            cursor.execute('INSERT OR REPLACE INTO phone_number (user_id, phone_number) VALUES (?, ?)', (user_id, telephone))
             conn.commit()
             return True
 

@@ -74,7 +74,11 @@ async def process_callback_button1(callback_query: types.CallbackQuery):
 @dp.message_handler(content_types=types.ContentTypes.CONTACT)
 async def process_contact(message: types.Message):
     phone_number = message.contact.phone_number
-    print(phone_number)
+    print(type(phone_number))
+    #Записываем номер телефона в базу
+    if not DB.save_user_telephone(message.chat.id, phone_number):
+        await message.reply("Произошла странная ошибка. Пожалуйста, свяжитесь с администратором - @Hrassf")
+    
     await bot.send_message(message.from_user.id, text=texts.contest_ok, reply_markup=types.ReplyKeyboardRemove())
 
 
