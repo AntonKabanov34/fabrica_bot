@@ -3,163 +3,238 @@ import config
 import sqlite3
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.dispatcher.filters.state import State, StatesGroup
+import re
 
 class DataBase:
     def __init__(self, db_name):
         """Управление базой данных"""
         self.db_name = db_name
-
+    
+    # Создания
     def create_db(self):
-        """Создает БД и структуру"""
-        with sqlite3.connect(self.db_name) as conn:
-            cursor = conn.cursor()
-            # Создаем таблицы, внутри БД
-            cursor.execute('''
-            CREATE TABLE IF NOT EXISTS tg_bot_users (
+        """Создание БД и таблиц"""
+        create_table_queries = [
+            """
+            CREATE TABLE IF NOT EXISTS bot_users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id INTEGER UNIQUE
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS users_data (
                 id INTEGER PRIMARY KEY,
-                chat_id INTEGER UNIQUE,
-                username TEXT,
+                user_name TEXT,
                 first_name TEXT,
                 last_name TEXT,
-                admin BOOLEAN DEFAULT FALSE,
-                sent_catalog BOOLEAN DEFAULT FALSE,
-                sent_price BOOLEAN DEFAULT FALSE
-            )
-            ''')
-            print('Создана таблица ---tg_bot_users---')
-
-            cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users_full_name (
-                user_id INTEGER PRIMARY KEY,
-                full_name TEXT,
-                FOREIGN KEY (user_id) REFERENCES tg_bot_users(id)
-            )
-            ''')
-            print('Создана таблица ---users_full_name---')
-
-            cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users_e_mail (
-                user_id INTEGER PRIMARY KEY,
-                e_mail TEXT,
-                FOREIGN KEY (user_id) REFERENCES tg_bot_users(id)
-            )
-            ''')
-            print('Создана таблица ---users_e_mail---')
-
-            cursor.execute('''
-            CREATE TABLE IF NOT EXISTS phone_number (
-                user_id INTEGER PRIMARY KEY,
-                phone_number TEXT,
-                FOREIGN KEY (user_id) REFERENCES tg_bot_users(id)
-            )
-            ''')
-            print('Создана таблица ---phone_number---')
-
-            cursor.execute('''
-            CREATE TABLE IF NOT EXISTS game_registr (
+                name TEXT,
+                company TEXT,
+                job_title TEXT,
+                email TEXT,
+                phone_quest TEXT,
+                agreement INTEGER DEFAULT 0,
+                phone_telegram TEXT,
+                FOREIGN KEY (id) REFERENCES bot_users (id)
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS admin (
                 id INTEGER PRIMARY KEY,
-                user_id INTEGER,
-                phone_number INTEGER UNIQUE,
-                reg_date DATETIME,
-                FOREIGN KEY (user_id) REFERENCES tg_bot_users(id)
-            )
-            ''')
-            print('Создана таблица ---game_registr---')
+                FOREIGN KEY (id) REFERENCES bot_users (id)
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS question (
+                id INTEGER PRIMARY KEY,
+                FOREIGN KEY (id) REFERENCES bot_users (id)
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS game_register (
+                id INTEGER PRIMARY KEY,
+                FOREIGN KEY (id) REFERENCES bot_users (id)
+            );
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS coun (
+                start INTEGER DEFAULT 0,
+                registration INTEGER DEFAULT 0,
+                catalog INTEGER DEFAULT 0,
+                price INTEGER DEFAULT 0,
+                game_now INTEGER DEFAULT 0,
+                game_all INTEGER DEFAULT 0,
+                email_all INTEGER DEFAULT 0,
+                phone_all INTEGER DEFAULT 0
+            );
+            """
+        ]
 
-            # Сохраняем изменения
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            for query in create_table_queries:
+                cursor.execute(query)
             conn.commit()
 
-            print(f"База данных {self.db_name} успешно создана или уже существует.")
+    def add_god(self, chat_id):
+        """Добавление первой записи chat_id в таблицы bot_users и admin"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            try:
+                # Добавляем chat_id в таблицу bot_users
+                cursor.execute("INSERT INTO bot_users (chat_id) VALUES (?)", (chat_id,))
+                user_id = cursor.lastrowid  # Получаем id только что добавленной записи
 
-    def create_new_db(self):
-        """Создает таблицу для сбора данных FSM"""
+                # Добавляем запись в таблицу admin с соответствующим user_id
+                cursor.execute("INSERT INTO admin (id) VALUES (?)", (user_id,))
+                conn.commit()
+                return True  # Возвращаем True, если добавление прошло успешно
+            except sqlite3.IntegrityError:
+                # Если chat_id уже существует в таблице bot_users, откатываем транзакцию
+                conn.rollback()
+                return False  # Возвращаем False, если добавление не удалось
+
+    # Проверки
+    def chek_users(self, chat_id):
+        """Проверяет есть ли обратившийся в списке пользователей"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM bot_users WHERE chat_id = ?", (chat_id,))
+            result = cursor.fetchone()
+            # Возвращаем True, если пользователь найден, иначе False
+            return result is not None  
         
+    def check_guestion(self, chat_id):
+        """Проверка наличия chat_id в таблицах bot_users и question"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            # Проверяем наличие chat_id в таблице bot_users
+            cursor.execute("SELECT id FROM bot_users WHERE chat_id = ?", (chat_id,))
+            result = cursor.fetchone()
+            if result is None:
+                print(f"Пользователь с chat_id {chat_id} не найден в таблице bot_users")
+                pass # Вернуть что-то другое, чтобы попросить пользователя нажать на /start
+            else:
+                user_id = result[0]
+                # Проверяем наличие user_id в таблице question
+                cursor.execute("SELECT id FROM question WHERE id = ?", (user_id,))
+                result = cursor.fetchone()
+                return result is not None  # Возвращаем True, если запись найдена, иначе False
+
+    def check_phone(self, number) -> bool:
+        """Проверяет корректность введенного номера телефона"""
+        pattern = r'^(\+7|8)\d{10}$'
+        return re.match(pattern, number) is not None
+
+    def check_email(self, email) -> bool:
+        """Проверяет корректность введенного email"""
+        pattern = r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
+        return re.match(pattern, email) is not None
+
+    def check_in_none(self, data: str) -> bool:
+        """Входящая строка должна содержать хотя бы 2 буквы. Латинские или русские"""
+        pattern = r'[a-zA-Zа-яА-Я]'
+        letters = re.findall(pattern, data)
+        return len(letters) >= 2
+
+
+    #Обновление данных в БД
+    def post_new_users(self, chat_id):
+        """Добавляет пользователя в БД, таблица bot_users"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            cursor.execute("INSERT INTO bot_users (chat_id) VALUES (?)", (chat_id,))
+            conn.commit()
+            return True  # Возвращаем True, если вставка прошла успешно
+    
+    def post_users_info(self, chat_id, user_name, first_name, last_name):
+        """Добавляет данные о пользователе полученные из месседж бокса в таблицу users_data"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            try:
+                # Сначала находим id пользователя в таблице bot_users
+                cursor.execute("SELECT id FROM bot_users WHERE chat_id = ?", (chat_id,))
+                result = cursor.fetchone()
+                if result is None:
+                    return False  # Пользователь не найден
+                user_id = result[0]
+
+                # Добавляем информацию о пользователе в таблицу users_data
+                cursor.execute("""
+                    INSERT INTO users_data (id, user_name, first_name, last_name)
+                    VALUES (?, ?, ?, ?)
+                """, (user_id, user_name, first_name, last_name))
+                conn.commit()
+                return True  # Возвращаем True, если добавление прошло успешно
+            except sqlite3.Error as e:
+                print(f"Ошибка при добавлении данных пользователя: {e}")
+                conn.rollback()
+                return False  # Возвращаем False, если добавление не удалось
+
+    def post_users_question_data(self, chat_id, name, company, job_title, email, phone_quest):
+        """Добавляет анкетные данные в таблицу users_data"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            try:
+                # Находим индекс записи в таблице bot_users по chat_id
+                cursor.execute("SELECT id FROM bot_users WHERE chat_id = ?", (chat_id,))
+                result = cursor.fetchone()
+                if result is None:
+                    return False  # Пользователь не найден
+                user_id = result[0]
+
+                # Вставляем или обновляем данные в таблице users_data
+                cursor.execute("""
+                    INSERT INTO users_data (id, name, company, job_title, email, phone_quest)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET
+                    name=excluded.name,
+                    company=excluded.company,
+                    job_title=excluded.job_title,
+                    email=excluded.email,
+                    phone_quest=excluded.phone_quest
+                """, (user_id, name, company, job_title, email, phone_quest))
+                conn.commit()
+                return True  # Возвращаем True, если вставка прошла успешно
+            
+            except sqlite3.Error as e:
+                print(f"Ошибка при добавлении анкетных данных: {e}")
+                conn.rollback()
+                return False  # Возвращаем False, если вставка не удалась
+
+    def post_user_agreements(self, answer:int):
+        """Меняет данные в таблице users_data, в столбце agreement. Вызывается в случае answer=1"""
         pass
 
-    def user_exam(self, chat_id: int) -> bool:
-        """Проверяет есть ли ID пользователя в базе"""
+    def post_user_question(self, chat_id):
+        """Находит id пользователя в bot_users и добавляет id пользователя в таблицу question"""
         with sqlite3.connect(self.db_name) as conn:
             cursor = conn.cursor()
-            cursor.execute('''
-            SELECT EXISTS(SELECT 1 FROM tg_bot_users WHERE chat_id = ?)
-            ''', (chat_id,))
-            result = cursor.fetchone()
-            return result[0] == 1
+            try:
+                # Находим id пользователя в таблице bot_users по chat_id
+                cursor.execute("SELECT id FROM bot_users WHERE chat_id = ?", (chat_id,))
+                result = cursor.fetchone()
+                if result is None:
+                    return False  # Пользователь не найден
+                user_id = result[0]
 
-    def add_god_admin(self, chat_id: int):
-        """Добавляет бога-админа через обработчик текста"""
-        with sqlite3.connect(self.db_name) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-            UPDATE tg_bot_users
-            SET admin = TRUE
-            WHERE chat_id = ?
-            ''', (chat_id,))
-            conn.commit()
+                # Добавляем id пользователя в таблицу question
+                cursor.execute("INSERT INTO question (id) VALUES (?)", (user_id,))
+                conn.commit()
+                return True  # Возвращаем True, если вставка прошла успешно
+            
+            except sqlite3.Error as e:
+                print(f"Ошибка при добавлении id пользователя в таблицу question: {e}")
+                conn.rollback()
+                return False  # Возвращаем False, если вставка не удалась
 
-    def admin_exam(self, user_id: int) -> bool:
-        """Проверяет является ли пользователь админом"""
-        with sqlite3.connect(self.db_name) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-            SELECT admin FROM tg_bot_users WHERE chat_id = ?
-            ''', (user_id,))
-            result = cursor.fetchone()
-            return result is not None and result[0]
+    def post_counter(self, param):
+        """Обращается к таблице coun и меняет значение на +1 по param"""
+        pass
 
-    def add_new_user(self, chat_id: int, first_name: str, last_name: str, username: str):
-        """Добавляет нового пользователя в БД"""
-        with sqlite3.connect(self.db_name) as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-            INSERT INTO tg_bot_users (chat_id, first_name, last_name, username)
-            VALUES (?, ?, ?, ?)
-            ''', (chat_id, first_name, last_name, username))
-            conn.commit()
+    #Получить данные
 
-    def save_user_name(self, chat_id: int, name: str) -> bool:
-        with sqlite3.connect(self.db_name) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT id FROM tg_bot_users WHERE chat_id = ?', (chat_id,))
-            user_id = cursor.fetchone()
-
-            if user_id is None:
-                return False
-
-            user_id = user_id[0]
-            cursor.execute('INSERT OR REPLACE INTO users_full_name (user_id, full_name) VALUES (?, ?)', (user_id, name))
-            conn.commit()
-            return True
-
-    def save_user_email(self, chat_id:int, email:str):
-        with sqlite3.connect(self.db_name) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT id FROM tg_bot_users WHERE chat_id = ?', (chat_id,))
-            user_id = cursor.fetchone()
-
-            if user_id is None:
-                return False
-
-            user_id = user_id[0]
-            cursor.execute('INSERT OR REPLACE INTO users_e_mail (user_id, e_mail) VALUES (?, ?)', (user_id, email))
-            conn.commit()
-            return True
-
-    def save_user_telephone(self, chat_id:int, telephone:str):
-        """Сохраняет в БД номер телефона пользователя, связываает его с CHAT_ID"""
-
-        with sqlite3.connect(self.db_name) as conn:
-            cursor = conn.cursor()
-            cursor.execute('SELECT id FROM tg_bot_users WHERE chat_id = ?', (chat_id,))
-            user_id = cursor.fetchone()
-
-            if user_id is None:
-                return False
-
-            user_id = user_id[0]
-            cursor.execute('INSERT OR REPLACE INTO phone_number (user_id, phone_number) VALUES (?, ?)', (user_id, telephone))
-            conn.commit()
-            return True
+    def get_count(self):
+        """Проходит по БД и получает всю актуальную информацию по цифрам"""
+        pass
 
 class KeyBoard:
     def __init__(self):
@@ -173,17 +248,6 @@ class KeyBoard:
         markup.add(KeyboardButton(texts.ask_question_button))
         return markup
     
-    def get_inline_buttons(self):
-        """Генерирует инлайн-кнопки основного меню."""
-        markup = InlineKeyboardMarkup()
-        markup.row(InlineKeyboardButton("Конкурс", callback_data=config.contest_1),InlineKeyboardButton("Получить каталог", callback_data=config.catalog_1))
-        return markup
-    
-    def get_number_buttons(self):
-        """Генерирует кнопку запроса номера телефона"""
-        keyboard = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-        keyboard.add(KeyboardButton(text=texts.contest_get_phone_button, request_contact=True))
-        return keyboard
 
 class Form(StatesGroup):
     name = State()
