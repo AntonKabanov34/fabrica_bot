@@ -25,6 +25,17 @@ async def handle_document(message: types.Message):
     await bot.send_message(message.chat.id, f"Имя файла: {file_name}")
     await bot.send_message(message.chat.id, f"Размер файла: {file_size} байт")
 
+@dp.message_handler(content_types=types.ContentType.STICKER)
+async def get_sticker_id(message: types.Message):
+    sticker_id = message.sticker.file_id
+    print(f"Sticker file_id: {sticker_id}")
+
+@dp.message_handler(content_types=types.ContentType.PHOTO)
+async def get_photo_id(message: types.Message):
+    # Получаем file_id последнего (самого большого) фото в сообщении
+    photo_id = message.photo[-1].file_id
+    print(f"Photo file_id: {photo_id}")
+
 # Запуск бота
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True)

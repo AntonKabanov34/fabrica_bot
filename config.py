@@ -1,4 +1,4 @@
-from secret_data import t, c, g, p_l_g, p_l_m, p_l_r_h, p_l_k, p_l_s, c_t
+from secret_data import t, c, g, p_l_g, p_l_m, p_l_r_h, p_l_k, p_l_s, c_t, map, stikers, fan_tower
 # Запустить скрипт get_file_id
 # Отпарвить файлы в чат 
 # Получить ID файлов и встаивть их в лист secret_data
@@ -21,6 +21,12 @@ PRICE_KIKI_FILE_ID = p_l_k
 PRICE_SALES_FILE_ID = p_l_s
 
 CONTACT_TELEPHONE = c_t
+
+#Найти стенд
+map_in=map
+stiker_dora = stikers
+
+test_tower = fan_tower
 
 #gt
 TABLE_TOKEN = '' #.json

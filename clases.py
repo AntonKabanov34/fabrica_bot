@@ -4,6 +4,10 @@ import sqlite3
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.dispatcher.filters.state import State, StatesGroup
 import re
+import openpyxl
+from openpyxl.styles import Font
+import os
+import datetime
 
 class DataBase:
     def __init__(self, db_name):
@@ -153,7 +157,26 @@ class DataBase:
             result = cursor.fetchone()
             # Возвращаем True, если пользователь найден, иначе False
             return result is not None  
-        
+
+    def chek_admin(self,chat_id):
+        """Проверяет пользователя на админа"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            try:
+                # Находим id пользователя в таблице bot_users по chat_id
+                cursor.execute("SELECT id FROM bot_users WHERE chat_id = ?", (chat_id,))
+                result = cursor.fetchone()
+                if result is None:
+                    return False  # Пользователь не найден
+                user_id = result[0]
+                # Проверяем, есть ли этот id в таблице admin
+                cursor.execute("SELECT COUNT(*) FROM admin WHERE id = ?", (user_id,))
+                result = cursor.fetchone()
+                return result[0] > 0  # Возвращаем True, если запись найдена, иначе False
+            except Exception as e:
+                print(f"Ошибка при проверке пользователя на админа: {e}")
+                return False
+
     def check_guestion(self, chat_id):
         """Проверка наличия chat_id в таблицах bot_users и question"""
         with sqlite3.connect(self.db_name) as conn:
@@ -409,8 +432,34 @@ class DataBase:
                 print(f"Ошибка при добавлении записи в game_register: {e}")
                 return False
 
+    def post_game_status(self, event, status):
+        """Меняет status по param в таблице status"""
+        try:
+            # Использование контекстного менеджера для подключения к базе данных
+            with sqlite3.connect(self.db_name) as conn:
+                cursor = conn.cursor()
+                # SQL-запрос для обновления статуса
+                query = f"UPDATE status SET status = ? WHERE event = ?"
+                cursor.execute(query, (status, event))
+                # Сохранение изменений
+                conn.commit()
+        except sqlite3.Error as e:
+            print(f"Ошибка при обновлении статуса игры: {e}")
+
+    def clear_game_register(self):
+        """Очищает таблицу game_register"""
+        try:
+            with sqlite3.connect(self.db_name) as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM game_register")
+                conn.commit()
+                print("Таблица game_register успешно очищена.")
+        except sqlite3.Error as e:
+            print(f"Ошибка при очистке таблицы game_register: {e}")
+        pass
+
     #Обработать данные
-    def format_lot_number(self,number):
+    def format_lot_number(self, number):
         """Форматирует число, используя символы из словаря lot_number"""
         # Преобразуем число в строку
         number_str = str(number)
@@ -433,10 +482,11 @@ class DataBase:
                 return False  # Возвращаем False в случае ошибки
     
     def get_user_lot(self, chat_id):
-        """Обращается по чат id к таблице bot_user, получает id пользователя, находит по id в таблице game_register loto_number пользователя и возвращает его"""
-        with sqlite3.connect(self.db_name) as conn:
-            cursor = conn.cursor()
-            try:
+        """Извлекает данные из таблицы game_register и соответствующие номера телефонов из таблицы users_data"""
+        try:
+            with sqlite3.connect(self.db_name) as conn:
+                cursor = conn.cursor()
+
                 # Находим id пользователя в таблице bot_users по chat_id
                 cursor.execute("SELECT id FROM bot_users WHERE chat_id = ?", (chat_id,))
                 result = cursor.fetchone()
@@ -444,18 +494,130 @@ class DataBase:
                     return None  # Пользователь не найден
                 user_id = result[0]
 
-                # Находим loto_number в таблице game_register по id пользователя
-                cursor.execute("SELECT loto_number FROM game_register WHERE id = ?", (user_id,))
+                # Получаем данные из таблицы game_register и соответствующие номера телефонов из таблицы users_data
+                cursor.execute("""
+                    SELECT gr.loto_number, ud.phone_telegram
+                    FROM game_register gr
+                    JOIN users_data ud ON gr.id = ud.id
+                    WHERE gr.id = ?
+                """, (user_id,))
+
                 result = cursor.fetchone()
                 if result is None:
                     return None  # Запись не найдена
-                loto_number = result[0]
 
-                return loto_number  # Возвращаем loto_number
-            except Exception as e:
-                print(f"Ошибка при получении loto_number: {e}")
-                return None
+                return result  # Возвращаем кортеж (loto_number, phone_telegram)
+        except sqlite3.Error as e:
+            print(f"Ошибка при извлечении данных из game_register и users_data: {e}")
+            return None
     
+    def get_all_users(self):
+        """Получает список всех chat_id"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            try:
+                # Выполняем запрос к таблице bot_users, чтобы получить все chat_id
+                cursor.execute("SELECT chat_id FROM bot_users")
+                results = cursor.fetchall()
+                # Извлекаем chat_id из результатов запроса и формируем список
+                chat_ids = [result[0] for result in results]
+                return chat_ids
+            except Exception as e:
+                print(f"Ошибка при получении списка chat_id: {e}")
+
+    #Получаем chat_id из таблицы game_register
+    def get_game_register_data(self):
+        """Извлекает данные из таблицы game_register"""
+        try:
+            with sqlite3.connect(self.db_name) as conn:
+                cursor = conn.cursor()
+
+                # Получаем список id из таблицы game_register
+                query = "SELECT id FROM game_register"
+                cursor.execute(query)
+                game_register_ids = [row[0] for row in cursor.fetchall()]
+
+                # Получаем список chat_id из таблицы bot_users по id из game_register
+                chat_ids = []
+                for user_id in game_register_ids:
+                    query = "SELECT chat_id FROM bot_users WHERE id = ?"
+                    cursor.execute(query, (user_id,))
+                    result = cursor.fetchone()
+                    if result:
+                        chat_ids.append(result[0])
+
+                return chat_ids
+        except sqlite3.Error as e:
+            print(f"Ошибка при извлечении данных из game_register и bot_users: {e}")
+            return []
+
+    def get_quest_users(self, chat_id):
+        """Обращается к таблице bot_users получает id пользователя по chat_id и проверяет наличие id в таблице user_data"""
+        try:
+            with sqlite3.connect(self.db_name) as conn:
+                cursor = conn.cursor()
+
+                # Получаем id пользователя из таблицы bot_users по chat_id
+                cursor.execute("SELECT id FROM bot_users WHERE chat_id = ?", (chat_id,))
+                result = cursor.fetchone()
+                if result is None:
+                    print(f"Пользователь с chat_id {chat_id} не найден в таблице bot_users.")
+                    return False
+                user_id = result[0]
+
+                # Проверяем наличие id в таблице user_data
+                cursor.execute("SELECT id FROM users_data WHERE id = ?", (user_id,))
+                result = cursor.fetchone()
+                if result is None:
+                    print(f"Пользователь с id {user_id} не найден в таблице users_data.")
+                    return False
+
+                print(f"Пользователь с chat_id {chat_id} и id {user_id} найден в таблице users_data.")
+                return True
+        except sqlite3.Error as e:
+            print(f"Ошибка при проверке наличия пользователя в таблицах bot_users и users_data: {e}")
+            return False
+
+    #Создание контрольной таблицы для розыгрыша 
+    def create_excel_file(self, data_dict, file_path):
+        """Создает Excel-файл с данными из словаря, где ключ - это loto_number, а значение - номер телефона"""
+        try:
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Game Register"
+
+            # Заголовки столбцов
+            headers = ["Loto Number", "Phone Telegram"]
+            for col_num, header in enumerate(headers, 1):
+                cell = ws.cell(row=1, column=col_num)
+                cell.value = header
+                cell.font = Font(bold=True)
+
+            # Заполнение данных
+            row_num = 2
+            for loto_number, phone_telegram in data_dict.items():
+                ws.cell(row=row_num, column=1, value=loto_number)
+                ws.cell(row=row_num, column=2, value=phone_telegram)
+                row_num += 1
+
+            wb.save(file_path)
+            print(f"Excel-файл успешно создан: {file_path}")
+        except Exception as e:
+            print(f"Ошибка при создании Excel-файла: {e}")
+       
+    
+    def file_delete(self, file_path):
+        """Отправляет файл пользователю и удаляет его, если файл существует"""
+        try:
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                print(f"Файл успешно отправлен и удален: {file_path}")
+            else:
+                print(f"Файл не найден: {file_path}")
+        except Exception as e:
+            print(f"Ошибка при отправке или удалении файла: {e}")
+
+
     def get_count(self):
         """Проходит по БД и получает всю актуальную информацию по цифрам"""
         pass
@@ -526,6 +688,79 @@ class KeyBoard:
         button_phone = KeyboardButton(text=texts.prize_registration, request_contact=True)
         keyboard.add(button_phone)
         return keyboard
+    
+    #Admin
+    def get_admin_main_menu(self):
+        """Рисует инлайн меню админки"""
+        keyboard = InlineKeyboardMarkup()
+        keyboard.row(
+            InlineKeyboardButton(texts.post_all_message, callback_data='post_all_message'),
+            InlineKeyboardButton(texts.get_game_status, callback_data='get_game_status')
+        )
+        keyboard.row(
+            InlineKeyboardButton(texts.get_bot_state, callback_data='get_bot_state'),
+            InlineKeyboardButton(texts.get_xml_file, callback_data='get_xml_file')
+        )
+        return keyboard
+    
+    def get_admin_message_confirm(self):
+        """Принтует меню для отпарвки сообщений всем пользователям"""
+        keyboard = InlineKeyboardMarkup()
+        keyboard.row(
+            InlineKeyboardButton(texts.confirm_data_yes, callback_data='confirm_message_yes'),
+            InlineKeyboardButton(texts.confirm_data_no, callback_data='confirm_message_no')
+        )
+        keyboard.row(
+            InlineKeyboardButton("Отмена", callback_data='confirm_message_cancel')
+        )
+        return keyboard
+
+    #Game
+    def game_main_menu(self):
+        """Меню управления игрой"""
+        keyboard = InlineKeyboardMarkup()
+        keyboard.row(
+            InlineKeyboardButton(texts.post_registration_status, callback_data='post_registration_status'),
+            InlineKeyboardButton(texts.post_list_gamers, callback_data='post_list_gamers')
+        )
+        keyboard.row(
+            InlineKeyboardButton("Отмена", callback_data='cancel_game_menu')
+        )
+        return keyboard
+
+    def game_registr_control(self):
+        """Меню управления регистрацией"""
+        # Открыть регистрацию, закртыь регистрацию
+        # Отмена
+        keyboard = InlineKeyboardMarkup()
+        keyboard.row(
+            InlineKeyboardButton(texts.post_status_game_open, callback_data='post_status_game_open'),
+            InlineKeyboardButton(texts.post_status_game_close, callback_data='post_status_game_close')
+        )
+        keyboard.row(
+            InlineKeyboardButton("Отмена", callback_data='cancel_game_menu')
+        )
+        return keyboard
+
+    def gamer_list_menu(self):
+        """Публикует кнопки меню для управлением списками игроков"""
+        keyboard = InlineKeyboardMarkup()
+        keyboard.row(
+            InlineKeyboardButton(texts.post_gamer_list, callback_data='post_gamer_list'),
+            InlineKeyboardButton(texts.post_gamer_del, callback_data='post_gamer_del')
+        )
+        keyboard.row(
+            InlineKeyboardButton("Отмена", callback_data='cancel_game_menu')
+        )
+        return keyboard
+
+
+DataB = DataBase(config.DB_NAME) 
+
+print(DataB.get_user_lot('166476724'))
+
+        
+
     
     
 

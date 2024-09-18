@@ -8,6 +8,8 @@ from aiogram.types import InputFile, InlineKeyboardMarkup, InlineKeyboardButton
 import config
 import texts
 import clases
+import datetime
+import os
 import logging
 import re
 
@@ -38,9 +40,9 @@ class UserForm(StatesGroup):
     phone = State()
     confirmation = State()
 
-class AdminMess(StatesGroup):
-    mess = State()
-    confirmation = State()
+class AdminMessage(StatesGroup):
+    write_message = State()
+    confirm_message = State()
 
 
 # Обработчик команды /start
@@ -66,43 +68,58 @@ async def send_welcome(message: types.Message):
         await bot.send_message(message.from_user.id, texts.restart, reply_markup=keyboard.get_main_menu())
 
 
-# Обработчик кнопок из MainMenu() 
+# __________Обработчик кнопок из MainMenu()________________ 
+        
 # Обработчик команды products
 @dp.message_handler(lambda message: message.text == texts.products)
 async def process_products(message: types.Message):
-    await bot.send_message(message.from_user.id, text=texts.mess_get_product, reply_markup=keyboard.get_product(), parse_mode="Markdown")
+    if DB.get_quest_users(message.from_user.id) == True:
+        await bot.send_message(message.from_user.id, text=texts.mess_get_product, reply_markup=keyboard.get_product(), parse_mode="Markdown")
+    else:
+        await bot.send_message(message.from_user.id, 'Что-то не могу вас найти... Нажмите /start и заполните анкету')
 
 # Обработчик команды prize
 @dp.message_handler(lambda message: message.text == texts.prize)
 async def process_prize(message: types.Message):
-    await bot.send_message(message.from_user.id, texts.prize_welcome)
-    # Проверка на доступность регистрации
-    if DB.check_registration_game('game') == True:
-        # Регистрация доступна проверка на id зарегестрированных
-        if DB.chek_game_register_id(message.from_user.id) == False:
-            # Игрок не зарегестрирован  - проводим интерактив.
-            await bot.send_message(message.from_user.id, texts.prize_open, reply_markup=keyboard.get_prize_comunication('one'))
+    if DB.get_quest_users(message.from_user.id) == True:
+        await bot.send_message(message.from_user.id, texts.prize_welcome)
+        # Проверка на доступность регистрации
+        if DB.check_registration_game('game') == True:
+            # Регистрация доступна проверка на id зарегестрированных
+            if DB.chek_game_register_id(message.from_user.id) == False:
+                # Игрок не зарегестрирован  - проводим интерактив.
+                await bot.send_message(message.from_user.id, texts.prize_open, reply_markup=keyboard.get_prize_comunication('one'))
+            else:
+                lot = DB.format_lot_number(DB.get_user_lot(message.from_user.id)[0])
+                await bot.send_message(message.from_user.id, text = f'{texts.prize_confirm_registr} {lot}', reply_markup=keyboard.get_main_menu())
+                pass
         else:
-            lot = DB.format_lot_number(DB.get_user_lot(message.from_user.id))
-            await bot.send_message(message.from_user.id, text = f'{texts.prize_confirm_registr} {lot}', reply_markup=keyboard.get_main_menu())
+            await bot.send_message(message.from_user.id, texts.prize_close, reply_markup=keyboard.get_main_menu())
             pass
     else:
-        await bot.send_message(message.from_user.id, texts.prize_close, reply_markup=keyboard.get_main_menu())
-        pass
+        await bot.send_message(message.from_user.id, 'Что-то не могу вас найти... Нажмите /start и заполните анкету')
 
 
 # Обработчик команды serch_stand
 @dp.message_handler(lambda message: message.text == texts.serch_stand)
 async def process_serch_stand(message: types.Message):
-    await bot.send_message(message.from_user.id, 'Здесь будет инструкция, как нас найти')
-
+    if DB.get_quest_users(message.from_user.id) == True:
+        await bot.send_photo(chat_id=message.from_user.id, photo=config.map_in, caption=texts.serch_stand_photo)
+        await bot.send_sticker(chat_id=message.from_user.id, sticker=config.stiker_dora)
+    else:
+        await bot.send_message(message.from_user.id, 'Что-то не могу вас найти... Нажмите /start и заполните анкету')
+    
 # Обработчик команды fabric_info
 @dp.message_handler(lambda message: message.text == texts.fabric_info)
 async def process_fabric_info(message: types.Message):
-    await bot.send_message(message.from_user.id, 'Фан факты о нас')
+    if DB.get_quest_users(message.from_user.id) == True:
+        await bot.send_message(message.from_user.id, 'Это заглушка для будущих фан-фактов')
+        await bot.send_photo(chat_id=message.from_user.id, photo=config.test_tower, caption='За 10 лет работы «Фабрика Творчества» произвела воздушный пластилин, по весу превышающий массу Эйфелевой башни') 
+    else:
+        await bot.send_message(message.from_user.id, 'Что-то не могу вас найти... Нажмите /start и заполните анкету')
 
  
-#FSM АНКЕТА
+#____________FSM АНКЕТА________________
 @dp.message_handler(state=UserForm.name)
 async def process_name(message: types.Message, state: FSMContext):
     if DB.check_in_none(message.text) == True: # Проверка на символы
@@ -193,6 +210,17 @@ async def process_update_db(callback_query: types.CallbackQuery):
     DB.post_user_agreements(callback_query.from_user.id)
     await bot.send_message(callback_query.from_user.id, texts.quest_out, reply_markup=keyboard.get_main_menu())
 
+#_________FSM MESSAGE_______
+@dp.message_handler(state=AdminMessage.write_message)
+async def process_write_message(message: types.Message, state: FSMContext):
+    async with state.proxy() as data:
+        data['message_text'] = message.text
+    
+    await AdminMessage.next()
+    await bot.send_message(message.from_user.id, f'{texts.post_message_chek}\n\n\"{message.text}\"\n\n{texts.post_message_chek_two}', reply_markup=keyboard.get_admin_message_confirm())
+
+
+#________________CallBack___________________
 #Колбеки для получения прайслиста и каталога
 @dp.callback_query_handler(lambda c: c.data in ['get_catalog', 'get_price_list'])
 async def process_product_callback(callback_query: types.CallbackQuery):
@@ -228,7 +256,7 @@ async def process_product_callback(callback_query: types.CallbackQuery):
     elif callback_query.data == 'registration_final':
         await bot.send_message(chat_id = callback_query.from_user.id, text=texts.prize_final_mess, reply_markup=keyboard.get_contact_keyboard())
 
-# Обработчик контактов  
+# Обработчик контактов из телеграм
 @dp.message_handler(content_types=['contact'])
 async def process_contact(message: types.Message):
     if message.contact:
@@ -245,8 +273,160 @@ async def process_contact(message: types.Message):
     else:
         await bot.send_message(message.from_user.id, text = texts.new_gamer_error, reply_markup=keyboard.get_main_menu())
         print('Ошибка в блоке создания новых игроков в розфыгрыше')
-        
 
+#Колбеки для меню администратора
+@dp.callback_query_handler(lambda c: c.data in ['post_all_message', 'get_game_status', 'get_bot_state', 'get_xml_file', 'post_registration_status', 'post_list_gamers', 'cancel_game_menu', 'post_status_game_open', 'post_status_game_close', 'post_gamer_list', 'post_gamer_del'])
+async def process_product_callback(callback_query: types.CallbackQuery):
+    #_____________Функционал для отправки сообщений всем пользователям_____________
+    if callback_query.data == 'post_all_message':
+        await AdminMessage.write_message.set()
+        await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text=texts.post_message)
+    
+    #____________Управление игрой________________ 
+    elif callback_query.data == 'get_game_status':
+        await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text=texts.post_game_control, reply_markup=keyboard.game_main_menu())
+
+    # Изменение статуса регистрации
+    elif callback_query.data == 'post_registration_status':
+        status_now = 'Открыта' if DB.check_registration_game('game') else 'Закрыта'
+        await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text=f'{texts.post_game_registr_text} {status_now}', reply_markup=keyboard.game_registr_control())
+        pass
+
+    # Открыть регистрацию
+    elif callback_query.data == 'post_status_game_open':
+        if DB.check_registration_game('game') == True:
+            await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text='Это защитное сообщение, регистарция в игру уже ОТКРЫТА')
+        else:
+            DB.post_game_status('game', 1)
+            await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text='Регистрация в игре ОТКРЫТА')
+        pass
+    # Закрыть регистрацию
+    elif callback_query.data == 'post_status_game_close':
+        if DB.check_registration_game('game') == False:
+            await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text='Это защитное сообщение, регистарция в игру уже ЗАКРЫТА')
+        else:
+            DB.post_game_status('game', 0)
+            await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text='Регистрация в игре ЗАКРЫТА')
+        pass
+
+
+
+
+    # Управление списком игроков
+    elif callback_query.data == 'post_list_gamers':
+        await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text=texts.post_gamer_list_text, reply_markup=keyboard.gamer_list_menu())
+        pass
+
+    elif callback_query.data == 'post_gamer_list':
+        # Получаем список chat_id участников
+        chat_ids = DB.get_game_register_data()
+        if not chat_ids:
+            await bot.send_message(callback_query.from_user.id, "Нет данных для отправки.")
+            return
+
+        # Создаем словарь для хранения данных
+        gamers = {}
+
+        # Получаем данные для каждого chat_id
+        for chat_id in chat_ids:
+            result = DB.get_user_lot(chat_id)
+            if result:
+                loto_number, phone_telegram = result
+                gamers[loto_number] = phone_telegram
+        print(gamers)
+        # Создаем временный файл для Excel с датой в названии
+        current_date = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        file_path = f"game_register_data_{current_date}.xlsx"
+        DB.create_excel_file(gamers, file_path)
+
+        try:
+            with open(file_path, 'rb') as file:
+                await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text='Контрольный лист участников:')
+                await bot.send_document(chat_id=callback_query.from_user.id, document=file)
+            os.remove(file_path)
+            print(f"Файл успешно отправлен и удален: {file_path}")
+        except Exception as e:
+            print(f"Ошибка при отправке или удалении файла: {e}")
+        pass
+    
+    elif callback_query.data == 'post_gamer_del':
+        #Проверяем октрыта или закрыта регистрация, если открыта, не даем очистить список игроков
+        if DB.check_registration_game('game') == False:
+            DB.clear_game_register()
+            await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text='Список участников успешно очищен')
+
+            pass
+        else:
+            await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text='Регистрация в игре ОТКРЫТА!\nЗакройте регистрацию прежде чем очистить список игроков и лотов')
+
+
+
+
+
+
+    #Выход из всех меню
+    elif callback_query.data == 'cancel_game_menu':
+        await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text=texts.post_cansel_menu)
+        pass
+
+
+    #Функционал для получения данных о пользователях
+    elif callback_query.data == 'get_bot_state':
+        pass
+    elif callback_query.data == 'get_xml_file':
+        #Функционал для получения дампа БД
+        pass
+
+#Колбеки для обработки FSM_Message
+@dp.callback_query_handler(lambda c: c.data in ['confirm_message_yes', 'confirm_message_no', 'confirm_message_cancel'], state=AdminMessage.confirm_message)
+async def process_confirm_message(callback_query: types.CallbackQuery, state: FSMContext):
+    await bot.answer_callback_query(callback_query.id)
+    
+    if callback_query.data == 'confirm_message_yes':
+        async with state.proxy() as data:
+            message_text = data['message_text']
+            users = DB.get_all_users()
+            eror_users = 0
+            mess_admin = f'{texts.post_message_out}\n\n"{message_text}"\n\nБыло отправлено {len(users)} пользователям\nОшибок при отправлении: {eror_users} (сообщения не доставлены: пользователя нет или он заблокировал бота)'
+            for user_id in users:
+                if user_id == callback_query.from_user.id:
+                    continue 
+                try:
+                    await bot.send_message(chat_id=user_id, text=message_text)
+                except Exception as e:
+                    eror_users = eror_users + 1
+                    
+            await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text=mess_admin)
+            await state.finish()
+
+    
+    elif callback_query.data == 'confirm_message_no':
+        await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text=texts.post_message_reply)
+        await AdminMessage.write_message.set()
+    
+    elif callback_query.data == 'confirm_message_cancel':
+        await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text=texts.post_message_cancel)
+        await state.finish()
+
+
+
+
+#____________Голос БОГА________________
+@dp.message_handler(lambda message: message.text.lower() in ['get_god_menu'])
+async def process_prize(message: types.Message):
+    if DB.chek_admin(message.from_user.id) == True:
+        await bot.send_message(message.from_user.id, "Здарова админ, че хочешь?", reply_markup=keyboard.get_admin_main_menu()) 
+    else:
+        pass 
+
+
+# Отправить сообщение всем пользователям FSM - ТЕКСТ - ПОДТВЕРЖДЕНИЕ - ОТПРАВКА
+# Замена статуса регистрации в игре - 2 команды ON/OF + отправка текущего статуса
+# Получить список участников розыгрыша СООБЩЕНИЕМ и XML + текущая дата
+# Удалить список участников полностью
+# Получить список всех пользователей бота в формате XML
+
+#____________start_____________________
 # Запуск бота!
 if __name__ == '__main__':
     executor.start_polling(dp, skip_updates=True)
