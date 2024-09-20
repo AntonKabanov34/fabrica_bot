@@ -25,6 +25,17 @@ async def handle_document(message: types.Message):
     await bot.send_message(message.chat.id, f"Имя файла: {file_name}")
     await bot.send_message(message.chat.id, f"Размер файла: {file_size} байт")
 
+# Обработчик загрузки GIF-файла
+@dp.message_handler(content_types=[types.ContentType.ANIMATION])
+async def handle_animation(message: types.Message):
+    file_id = message.animation.file_id
+    file_name = message.animation.file_name
+    file_size = message.animation.file_size
+    
+    await bot.send_message(message.chat.id, f"ID загруженного GIF-файла: {file_id}")
+    await bot.send_message(message.chat.id, f"Имя файла: {file_name}")
+    await bot.send_message(message.chat.id, f"Размер файла: {file_size} байт")
+
 @dp.message_handler(content_types=types.ContentType.STICKER)
 async def get_sticker_id(message: types.Message):
     sticker_id = message.sticker.file_id

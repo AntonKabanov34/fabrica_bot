@@ -99,7 +99,6 @@ async def process_prize(message: types.Message):
     else:
         await bot.send_message(message.from_user.id, 'Что-то не могу вас найти... Нажмите /start и заполните анкету')
 
-
 # Обработчик команды serch_stand
 @dp.message_handler(lambda message: message.text == texts.serch_stand)
 async def process_serch_stand(message: types.Message):
@@ -113,8 +112,20 @@ async def process_serch_stand(message: types.Message):
 @dp.message_handler(lambda message: message.text == texts.fabric_info)
 async def process_fabric_info(message: types.Message):
     if DB.get_quest_users(message.from_user.id) == True:
-        await bot.send_message(message.from_user.id, 'Это заглушка для будущих фан-фактов')
-        await bot.send_photo(chat_id=message.from_user.id, photo=config.test_tower, caption='За 10 лет работы «Фабрика Творчества» произвела воздушный пластилин, по весу превышающий массу Эйфелевой башни') 
+        #Eсли пользователь не получил еще ни одного фан-факта
+        if DB.get_data_ff(message.from_user.id) == False:
+            await bot.send_photo(chat_id=message.from_user.id, photo=texts.fan_in_photo, caption=texts.fan_in, reply_markup=keyboard.get_next_fact())
+        
+        #Если пользователь посмотрел все фанфакты
+        elif len(DB.get_data_ff(message.from_user.id)) >= 10:
+            await bot.send_photo(chat_id=message.from_user.id, photo=texts.fan_in_photo, caption=texts.fan_in, reply_markup=keyboard.get_next_fact())
+            #await bot.send_message(message.from_user.id, "Подробней о нас можно узнать на стенде")
+        # Для всех остальных случаев, когда пользователь получил часть фактов но не все
+        else:
+            await bot.send_message(message.from_user.id, "Может еще один фан-факт?", reply_markup=keyboard.get_next_fact())
+
+
+         
     else:
         await bot.send_message(message.from_user.id, 'Что-то не могу вас найти... Нажмите /start и заполните анкету')
 
@@ -275,7 +286,7 @@ async def process_contact(message: types.Message):
         print('Ошибка в блоке создания новых игроков в розфыгрыше')
 
 #Колбеки для меню администратора
-@dp.callback_query_handler(lambda c: c.data in ['post_all_message', 'get_game_status', 'get_bot_state', 'get_xml_file', 'post_registration_status', 'post_list_gamers', 'cancel_game_menu', 'post_status_game_open', 'post_status_game_close', 'post_gamer_list', 'post_gamer_del'])
+@dp.callback_query_handler(lambda c: c.data in ['post_all_message', 'get_game_status', 'get_bot_state', 'get_xml_file', 'post_registration_status', 'post_list_gamers', 'cancel_game_menu', 'post_status_game_open', 'post_status_game_close', 'post_gamer_list', 'post_gamer_del', 'next_fun_fact'])
 async def process_product_callback(callback_query: types.CallbackQuery):
     #_____________Функционал для отправки сообщений всем пользователям_____________
     if callback_query.data == 'post_all_message':
@@ -308,8 +319,6 @@ async def process_product_callback(callback_query: types.CallbackQuery):
             DB.post_game_status('game', 0)
             await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text='Регистрация в игре ЗАКРЫТА')
         pass
-
-
 
 
     # Управление списком игроков
@@ -359,10 +368,58 @@ async def process_product_callback(callback_query: types.CallbackQuery):
         else:
             await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text='Регистрация в игре ОТКРЫТА!\nЗакройте регистрацию прежде чем очистить список игроков и лотов')
 
+    elif callback_query.data == 'next_fun_fact':
+        fact_now = DB.get_data_ff(callback_query.from_user.id)
+        # Ситуация с нулевыми фактами
+        if fact_now == False:
+            from random import randint
+            fact_post = randint(1,10)
+            DB.post_data_ff(callback_query.from_user.id, fact_post)
+            post = texts.ff_data[fact_post]
+            if post[0] == 'gif':
+                await bot.send_animation(chat_id=callback_query.from_user.id, animation=post[2], caption=post[1], reply_markup=keyboard.get_next_fact())
+                await bot.answer_callback_query(callback_query.id)
+            else:
+                await bot.send_photo(chat_id=callback_query.from_user.id, photo=post[2], caption=post[1], reply_markup=keyboard.get_next_fact())
+                await bot.answer_callback_query(callback_query.id)
+            pass
+        elif len(fact_now.split(',')) >= 10:
+            if DB.get_quest_users(callback_query.from_user.id) == True:
+                await bot.send_photo(chat_id=callback_query.from_user.id, photo=config.map_in, caption=texts.fan_map_close)
+                await bot.send_sticker(chat_id=callback_query.from_user.id, sticker=config.stiker_dora)
+            else:
+                await bot.send_message(callback_query.from_user.id, 'Что-то не могу вас найти... Нажмите /start и заполните анкету')
+                pass
+        else:
+            from random import randint
+            #Спсиок отправленных фанфактов 
+            fact_all=list(texts.ff_data.keys())
+            now = fact_now.split(',')
+            now = [int(item) for item in now]
+            result_list = set(fact_all) - set(now)
+            result_list = list(result_list)
+            
+            # Номер следующего факта (индекс)
+            fact_post = randint(0, len(result_list)-1)
+            
+            print(f'Список ключей фанфактов: {fact_all}')
+            print(f'Опубликованные факты: {now}')
+            print(f'Остаток по фактам: {result_list}')
+            print(f'Индекс следующего факта: {fact_post}')
 
 
-
-
+            DB.post_data_ff(callback_query.from_user.id, result_list[fact_post])
+            #Номер фан факта {result_list[fact_post]}'
+            #тест отправки гиф result_list[fact_post]][0]
+            resultats = texts.ff_data[[result_list[fact_post]][0]]
+            print(f'Результат извлечения из словаря: {resultats}')
+            if resultats[0] == 'gif':
+                await bot.send_animation(chat_id=callback_query.from_user.id, animation=resultats[2], caption=resultats[1], reply_markup=keyboard.get_next_fact())
+                await bot.answer_callback_query(callback_query.id)
+            else:
+                await bot.send_photo(chat_id=callback_query.from_user.id, photo=resultats[2], caption=resultats[1], reply_markup=keyboard.get_next_fact())
+                await bot.answer_callback_query(callback_query.id)
+            pass
 
     #Выход из всех меню
     elif callback_query.data == 'cancel_game_menu':
@@ -372,9 +429,23 @@ async def process_product_callback(callback_query: types.CallbackQuery):
 
     #Функционал для получения данных о пользователях
     elif callback_query.data == 'get_bot_state':
+        # Принтует текущие данные о состоянии бота
+        mes = f"Данные записанные в БД:\n\nКол-во нажатий СТАРТ: {DB.get_all_count('start')}\nКол-во заполненых анкет: {DB.get_all_count('registration')}\nКол-во отправленных каталогов: {DB.get_all_count('catalog')}\nКол-во отправленных прайсов: {DB.get_all_count('price')}\nКол-во электронных адресов: {DB.get_all_count('email_all')}\nКол-во анкетных телефонов: {DB.get_all_count('phone_all')}\nКол-во регистраций (СЕЙЧАС): {DB.get_game_count()}\nОбщее число регистраций: {DB.get_personal_phone()}"
+        await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text=mes)
         pass
+
     elif callback_query.data == 'get_xml_file':
-        #Функционал для получения дампа БД
+        current_date = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        file_path =f'{DB.get_users_data_xml(current_date)}'
+
+        try:
+            with open(file_path, 'rb') as file:
+                await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text='Дамп текущей БД:')
+                await bot.send_document(chat_id=callback_query.from_user.id, document=file)
+            os.remove(file_path)
+            print(f"Файл успешно отправлен и удален: {file_path}")
+        except Exception as e:
+            print(f"Ошибка при отправке или удалении файла: {e}")
         pass
 
 #Колбеки для обработки FSM_Message

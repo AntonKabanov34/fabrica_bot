@@ -6,8 +6,10 @@ from aiogram.dispatcher.filters.state import State, StatesGroup
 import re
 import openpyxl
 from openpyxl.styles import Font
+from openpyxl import Workbook
 import os
-import datetime
+
+
 
 class DataBase:
     def __init__(self, db_name):
@@ -21,7 +23,8 @@ class DataBase:
             """
             CREATE TABLE IF NOT EXISTS bot_users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                chat_id INTEGER UNIQUE
+                chat_id INTEGER UNIQUE,
+                ff_idx TEXT DEFAULT NULL
             );
             """,
             """
@@ -52,7 +55,7 @@ class DataBase:
                 FOREIGN KEY (id) REFERENCES bot_users (id)
             );
             """,
-             """
+            """
             CREATE TABLE IF NOT EXISTS game_register (
                 id INTEGER PRIMARY KEY,
                 loto_number INTEGER DEFAULT 1,
@@ -84,6 +87,7 @@ class DataBase:
             for query in create_table_queries:
                 cursor.execute(query)
             conn.commit()
+            print("Все таблицы БД созданы успешно")
 
     def create_game(self):
         """Создание строки в таблице status со значением game и 0"""
@@ -196,8 +200,11 @@ class DataBase:
 
     def check_phone(self, number) -> bool:
         """Проверяет корректность введенного номера телефона"""
-        pattern = r'^(\+7|8)\d{10}$'
-        return re.match(pattern, number) is not None
+        # Удаляем все лишние символы
+        cleaned_number = re.sub(r'\D', '', number)
+        # Проверяем, что очищенный номер соответствует шаблону
+        pattern = r'^7\d{10}$|^8\d{10}$'
+        return re.match(pattern, cleaned_number) is not None
 
     def check_email(self, email) -> bool:
         """Проверяет корректность введенного email"""
@@ -525,6 +532,55 @@ class DataBase:
             except Exception as e:
                 print(f"Ошибка при получении списка chat_id: {e}")
 
+    def get_all_count(self, param):
+        """Получает даные из таблицы coun, на вход принимает имя столбца"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            query = f"SELECT {param} FROM coun"
+            cursor.execute(query)
+            result = cursor.fetchone()
+            return result[0] if result else None
+
+    def get_personal_phone(self):
+        """Получает кол-во записей в столбце phone_telegram таблицы users_data"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            query = "SELECT COUNT(phone_telegram) FROM users_data WHERE phone_telegram IS NOT NULL"
+            cursor.execute(query)
+            result = cursor.fetchone()
+            return result[0] if result else 0
+
+    def get_users_data_xml(self, datetime_str):
+        """Обращается к таблице users_data, формирует из каждой строки строку в формате EXCEL"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            query = "SELECT * FROM users_data"
+            cursor.execute(query)
+            rows = cursor.fetchall()
+
+            # Создаем новый Excel-файл
+            wb = Workbook()
+            ws = wb.active
+
+            # Заголовки столбцов
+            headers = [
+                "id", "user_name", "first_name", "last_name", "name",
+                "company", "job_title", "email", "phone_quest",
+                "agreement", "phone_telegram"
+            ]
+            ws.append(headers)
+
+            # Заполняем данными
+            for row in rows:
+                ws.append(row)
+
+            # Формируем уникальное имя файла
+            file_name = f"users_data_{datetime_str}.xlsx"
+
+            # Сохраняем файл
+            wb.save(file_name)
+            return file_name
+
     #Получаем chat_id из таблицы game_register
     def get_game_register_data(self):
         """Извлекает данные из таблицы game_register"""
@@ -605,7 +661,6 @@ class DataBase:
         except Exception as e:
             print(f"Ошибка при создании Excel-файла: {e}")
        
-    
     def file_delete(self, file_path):
         """Отправляет файл пользователю и удаляет его, если файл существует"""
         try:
@@ -617,10 +672,66 @@ class DataBase:
         except Exception as e:
             print(f"Ошибка при отправке или удалении файла: {e}")
 
+    #Методы для фанфактов
+    def get_data_ff(self, chat_id):
+        """Обращается к таблице bot_user по chat_id, проверяет наличие данных, получает данные и возвращает кортеж"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            try:
+                # Проверяем наличие записи в таблице bot_users по chat_id
+                cursor.execute("SELECT id, ff_idx FROM bot_users WHERE chat_id = ?", (chat_id,))
+                result = cursor.fetchone()
+                if result is None:
+                    print(f"Запись с chat_id {chat_id} не найдена в таблице bot_users")
+                    return None
+                
+                user_id, ff_idx = result
+                
+                # Проверяем, есть ли данные в столбце ff_idx
+                if ff_idx is None:
+                    print(f"Данные в столбце ff_idx для chat_id {chat_id} отсутствуют")
+                    return False
+                else:
+                # Возвращаем кортеж с данными
+                    return (ff_idx)
+            
+            except sqlite3.Error as e:
+                print(f"Ошибка при получении данных из таблицы bot_users: {e}")
+                return None
 
-    def get_count(self):
-        """Проходит по БД и получает всю актуальную информацию по цифрам"""
+    def post_data_ff(self, chat_id, fact_key):
+        """Принимает на вход чат айди пользователя и номер факта, добавляет номер факта в столбец ff_idx по chat_id"""
+        with sqlite3.connect(self.db_name) as conn:
+            cursor = conn.cursor()
+            try:
+                # Проверяем наличие записи в таблице bot_users по chat_id
+                cursor.execute("SELECT id, ff_idx FROM bot_users WHERE chat_id = ?", (chat_id,))
+                result = cursor.fetchone()
+                
+                if result is None:
+                    print(f"Запись с chat_id {chat_id} не найдена в таблице bot_users")
+                    return False
+                
+                user_id, ff_idx = result
+                
+                # Если ff_idx равен NULL, заменяем его на fact_key
+                if ff_idx is None:
+                    new_ff_idx = str(fact_key)
+                else:
+                    # Добавляем fact_key к существующим данным
+                    new_ff_idx = ff_idx + ',' + str(fact_key)
+                
+                # Обновляем столбец ff_idx
+                cursor.execute("UPDATE bot_users SET ff_idx = ? WHERE id = ?", (new_ff_idx, user_id))
+                conn.commit()
+                print(f"Данные успешно добавлены для chat_id {chat_id}")
+                return True
+            
+            except sqlite3.Error as e:
+                print(f"Ошибка при добавлении данных в таблицу bot_users: {e}")
+                return False
         pass
+
 
 class KeyBoard:
     def __init__(self):
@@ -754,17 +865,11 @@ class KeyBoard:
         )
         return keyboard
 
-
-DataB = DataBase(config.DB_NAME) 
-
-print(DataB.get_user_lot('166476724'))
-
-        
-
-    
-    
-
-
-
-
-        
+    #Fan_fact_Inline
+    def get_next_fact(self):
+        """Принтует кнопку и колбек для старта фактов"""
+        keyboard = InlineKeyboardMarkup()
+        keyboard.row(
+            InlineKeyboardButton(texts.fan_inline, callback_data='next_fun_fact'),
+        )
+        return keyboard
