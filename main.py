@@ -384,7 +384,7 @@ async def process_product_callback(callback_query: types.CallbackQuery):
         elif len(fact_now.split(',')) >= 10:
             if DB.get_quest_users(callback_query.from_user.id) == True:
                 await bot.send_photo(chat_id=callback_query.from_user.id, photo=config.map_in, caption=texts.fan_map_close)
-                await bot.send_sticker(chat_id=callback_query.from_user.id, sticker=config.stiker_dora)
+                await bot.send_sticker(chat_id=callback_query.from_user.id, sticker=config.stiker_dora, reply_markup=keyboard.get_main_menu())
             else:
                 await bot.send_message(callback_query.from_user.id, 'Что-то не могу вас найти... Нажмите /start и заполните анкету')
                 pass
@@ -476,6 +476,16 @@ async def process_confirm_message(callback_query: types.CallbackQuery, state: FS
     elif callback_query.data == 'confirm_message_cancel':
         await bot.edit_message_text(chat_id=callback_query.from_user.id, message_id=callback_query.message.message_id, text=texts.post_message_cancel)
         await state.finish()
+
+@dp.message_handler(commands=['reboot'])
+async def reboot_fsm_form(message: types.Message, state: FSMContext):
+    # Завершаем текущее состояние FSM (если оно есть)
+    await state.finish()
+    # Отправляем сообщение о перезапуске анкеты
+    await bot.send_message(message.from_user.id, "Перезапуск бота...")
+    # Начинаем с первого вопроса анкеты
+    await UserForm.name.set()
+    await bot.send_message(message.from_user.id, texts.what_name, parse_mode="Markdown")
 
 #____________Голос БОГА________________
 @dp.message_handler(lambda message: message.text.lower() in ['get_god_menu'])
